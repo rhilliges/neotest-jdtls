@@ -70,16 +70,10 @@ local function get_java_test_item(test_file_uri)
 		arguments = { test_file_uri },
 	}).result
 	log.debug('java_test_items', vim.inspect(java_test_items))
-	if java_test_items == nil then
+	if #java_test_items ~= 1 then
+		log.info('Unexpected number of test items found: ', #java_test_items)
 		return {}
 	end
-	assert(
-		#java_test_items == 1,
-		'Too many test items found: '
-			.. #java_test_items
-			.. ' for '
-			.. test_file_uri
-	)
 	return java_test_items
 end
 
@@ -91,9 +85,9 @@ local function handle_test(data, test_file_uri)
 	local java_test_item = java_test_items[1]
 	---@type JavaTestItem
 	local closest_item = nil
-	local start_line = data.range[1] + 1
+	local end_line = data.range[3]
 	for _, children in ipairs(java_test_item.children) do
-		if children.range.start.line == start_line then
+		if children.range['end'].line == end_line then
 			closest_item = children
 			break
 		end
