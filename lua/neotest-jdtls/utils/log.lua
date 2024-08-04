@@ -21,7 +21,8 @@ local default_config = {
 	use_file = true,
 
 	-- Any messages above this level will be logged.
-	level = 'trace',
+	-- TODO user config
+	level = 'info',
 
 	-- Level configuration
 	modes = {

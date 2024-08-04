@@ -1,48 +1,32 @@
-local data_adapters = require('java-core.adapters')
-local ReportViewer = require('java-test.ui.floating-report-viewer')
-local ResultParserFactory = require('java-test.results.result-parser-factory')
-local JUnitReport = require('java-test.reports.junit')
-local log = require('neotest-jdtls.log')
-local execute_command = require('neotest-jdtls.utils').execute_command
+local JUnitReport = require('neotest-jdtls.junit.reports.junit')
+local log = require('neotest-jdtls.utils.log')
+local TestLevel = require('neotest-jdtls.utils.jdtls').TestLevel
 local nio = require('nio')
+local jdtls = require('neotest-jdtls.utils.jdtls')
 
 local M = {}
 
-local TestLevel = {
-	Workspace = 1,
-	WorkspaceFolder = 2,
-	Project = 3,
-	Package = 4,
-	Class = 5,
-	Method = 6,
-}
-
----Returns a stream reader function
----@param conn uv_tcp_t
----@return fun(err: string, buffer: string) # callback function
--- local function get_stream_reader(conn)
--- 	-- self.conn = conn
--- 	-- self.result_parser = self.result_parser_fac:get_parser()
---
--- 	return vim.schedule_wrap(function(err, buffer)
--- 		if err then
--- 			-- self:on_error(err)
--- 			-- self:on_close()
--- 			-- self.conn:close()
--- 			return
--- 		end
---
--- 		if buffer then
--- 			log.debug('buffer >> ', buffer)
--- 			-- self:on_update(buffer)
--- 		else
--- 			log.debug('buffer is nil close')
--- 			-- self:on_close(conn)
--- 			conn:close()
--- 			-- self.conn:close()
--- 		end
--- 	end)
--- end
+local function get_dap_launcher_config(launch_args, java_exec, config)
+	return {
+		name = config.label,
+		type = 'java',
+		request = 'launch',
+		mainClass = launch_args.mainClass,
+		projectName = launch_args.projectName,
+		noDebug = not config.debug,
+		javaExec = java_exec,
+		cwd = launch_args.workingDirectory,
+		classPaths = launch_args.classpath,
+		modulePaths = launch_args.modulepath,
+		vmArgs = table.concat(launch_args.vmArguments, ' '),
+		args = table.concat(launch_args.programArguments, ' '),
+		-- env: config?.env,
+		-- envFile: config?.envFile,
+		-- sourcePaths: config?.sourcePaths,
+		-- preLaunchTask: config?.preLaunchTask,
+		-- postDebugTask: config?.postDebugTask,
+	}
+end
 
 local function setup(server, dap_launcher_config, report)
 	server:bind('127.0.0.1', 0)
@@ -50,7 +34,6 @@ local function setup(server, dap_launcher_config, report)
 		assert(not err, err)
 		local sock = assert(vim.loop.new_tcp(), 'uv.new_tcp must return handle')
 		server:accept(sock)
-		-- report:get_stream_reader(sock))
 		local success = sock:read_start(report:get_stream_reader(sock))
 		assert(success == 0, 'failed to listen to reader')
 	end)
@@ -65,10 +48,7 @@ end
 ---@param test_file_uri string
 local function get_java_test_item(test_file_uri)
 	---@type JavaTestItem
-	local java_test_items = execute_command({
-		command = 'vscode.java.test.findTestTypesAndMethods',
-		arguments = { test_file_uri },
-	}).result
+	local java_test_items = jdtls.find_test_types_and_methods(test_file_uri)
 	log.debug('java_test_items', vim.inspect(java_test_items))
 	if #java_test_items ~= 1 then
 		log.info('Unexpected number of test items found: ', #java_test_items)
@@ -197,12 +177,7 @@ local function resolve_junit_launch_arguments(tree, test_file_uri)
 	else
 		error('Unsupported type: ' .. data.type)
 	end
-	local launch_arguments = execute_command({
-		command = 'vscode.java.test.junit.argument',
-		arguments = vim.fn.json_encode(arguments),
-	}).result.body
-
-	return launch_arguments
+	return jdtls.get_junit_launch_arguments(arguments)
 end
 
 ---@param args neotest.RunArgs
@@ -218,29 +193,28 @@ function M.build_spec(args)
 	local junit_launch_arguments =
 		resolve_junit_launch_arguments(tree, test_file_uri)
 
-	local executable = execute_command({
-		command = 'vscode.java.resolveJavaExecutable',
-		arguments = {
-			junit_launch_arguments.mainClass,
-			junit_launch_arguments.projectName,
-		},
-	}).result
+	local executable = jdtls.resolve_java_executable(
+		junit_launch_arguments.mainClass,
+		junit_launch_arguments.projectName
+	)
 
 	local is_debug = strategy == 'dap'
 	local dap_launcher_config =
-		data_adapters.get_dap_launcher_config(junit_launch_arguments, executable, {
+		get_dap_launcher_config(junit_launch_arguments, executable, {
 			debug = is_debug,
 			label = 'Launch All Java Tests',
 		})
 	log.debug('dap_launcher_config', vim.inspect(dap_launcher_config))
-	local report = JUnitReport(ResultParserFactory(), ReportViewer())
+	local report = JUnitReport()
 	local server = assert(vim.loop.new_tcp(), 'uv.new_tcp() must return handle')
 	dap_launcher_config = setup(server, dap_launcher_config, report)
 
 	local config = {}
 	if not is_debug then
+		-- TODO implement console for non-debug mode
+		-- local dapui       = require('dapui')
+		-- local console_buf = dapui.elements.console.buffer()
 		run_test(dap_launcher_config, server)
-		log.debug('sessions', vim.inspect(require('dap').session()))
 	else
 		dap_launcher_config.after = function()
 			vim.schedule(function()
@@ -275,26 +249,3 @@ return M
 ---@class ResolvedMainClass
 ---@field mainClass string
 ---@field projectName string
-
----@class JavaTestItem
----@field children JavaTestItem[]
----@field uri string
----@field range Range
----@field jdtHandler string
----@field fullName string
----@field label string
----@field id string
----@field projectName string
----@field testKind number
----@field testLevel number
----@field sortText string|nil
----@field uniqueId string|nil
----@field natureIds string[]|nil
-
----@class Range
----@field start Position
----@field end Position
-
----@class Position
----@field line number
----@field character number

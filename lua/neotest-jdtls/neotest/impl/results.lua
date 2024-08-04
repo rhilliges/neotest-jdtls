@@ -1,9 +1,10 @@
 local async = require('neotest.async')
-local log = require('neotest-jdtls.log')
+local log = require('neotest-jdtls.utils.log')
 local lib = require('neotest.lib')
 
 local M = {}
 
+--- @enum TestStatus
 local TestStatus = {
 	Failed = 'failed',
 	Skipped = 'skipped',
