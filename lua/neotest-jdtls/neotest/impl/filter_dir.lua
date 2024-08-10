@@ -8,7 +8,7 @@ M.filter_dir = function(name, rel_path, root)
 	log.debug('filter_dir check:', name, rel_path, path)
 	local path_ok = false
 
-	local current_project = project.get_current_project()
+	local current_project = project.get_current_project(root)
 	if current_project.packages[path] then
 		path_ok = true
 	else

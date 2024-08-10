@@ -1,4 +1,7 @@
+local nio = require('nio')
+
 local adapter = {}
+
 ---@class neotest.Adapter
 ---@field name string
 adapter.Adapter = { name = 'neotest-jdtls' }
@@ -19,6 +22,7 @@ end
 ---@param root string Root directory of project
 ---@return boolean
 function adapter.Adapter.filter_dir(name, rel_path, root)
+	nio.scheduler()
 	return require('neotest-jdtls.neotest.impl.filter_dir').filter_dir(
 		name,
 		rel_path,
@@ -30,6 +34,7 @@ end
 ---@param file_path string
 ---@return boolean
 function adapter.Adapter.is_test_file(file_path)
+	nio.scheduler()
 	local is_test_file =
 		require('neotest-jdtls.neotest.impl.is_test_file').is_test_file(file_path)
 	return is_test_file

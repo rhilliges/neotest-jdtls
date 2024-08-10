@@ -22,7 +22,7 @@ local default_config = {
 
 	-- Any messages above this level will be logged.
 	-- TODO user config
-	level = 'info',
+	level = 'trace',
 
 	-- Level configuration
 	modes = {

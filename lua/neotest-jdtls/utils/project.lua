@@ -1,11 +1,9 @@
 local log = require('neotest-jdtls.utils.log')
-local jdtls = require('neotest-jdtls.utils.jdtls')
+local jdtls = require('neotest-jdtls.utils.jdtls_nio')
 local class = require('neotest-jdtls.utils.class')
-local nio = require('nio')
 
 local M = {
 	project_cache = nil,
-	project_load_event = nio.control.event(),
 }
 
 --- @class ProjectCache
@@ -23,43 +21,41 @@ function ProjectCache:_init()
 	self.methods = {}
 end
 
-local function load_current_project()
-	local event = nio.control.event()
-	vim.schedule(function()
-		log.debug('Load project cache')
-		local cache = ProjectCache()
+--- @param root string
+local function load_current_project(root)
+	log.debug('Load project cache')
+	local cache = ProjectCache()
 
-		local project = jdtls.find_java_projects()
-		assert(#project == 1)
-		local jdtHandler = project[1].jdtHandler
+	local project = jdtls.find_java_projects(root)
+	log.debug('project', vim.inspect(project), #project)
+	assert(#project == 1)
+	local jdtHandler = project[1].jdtHandler
 
-		local data = jdtls.find_test_packages_and_types(jdtHandler)
-		for _, package in ipairs(data) do
-			if package.testLevel == 4 or package.testLevel == 3 then
-				cache.packages[package.uri] = {
-					package = package,
+	local data = jdtls.find_test_packages_and_types(jdtHandler)
+	for _, package in ipairs(data) do
+		if package.testLevel == 4 or package.testLevel == 3 then
+			cache.packages[package.uri] = {
+				package = package,
+			}
+			if #package.uri > #cache.longestTestFolder then
+				cache.longestTestFolder = package.uri
+			end
+
+			for _, child in ipairs(package.children) do
+				cache.classes[child.uri] = {
+					classes = child,
 				}
-				if #package.uri > #cache.longestTestFolder then
-					cache.longestTestFolder = package.uri
-				end
-
-				for _, child in ipairs(package.children) do
-					cache.classes[child.uri] = {
-						classes = child,
-					}
-				end
 			end
 		end
-		M.project_cache = cache
-		event.set()
-	end)
-	return event
+	end
+	M.project_cache = cache
 end
 
 --- @return ProjectCache
-function M.get_current_project()
+--- @param root string
+function M.get_current_project(root)
 	if not M.project_cache then
-		load_current_project().wait()
+		load_current_project(root)
 		return M.project_cache
 	else
 		return M.project_cache
