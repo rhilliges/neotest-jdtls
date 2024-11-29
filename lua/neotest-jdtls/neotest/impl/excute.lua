@@ -1,4 +1,5 @@
 local JUnitReport = require('neotest-jdtls.junit.reports.junit')
+local TestNGReport = require('neotest-jdtls.testng.reports.testng')
 local log = require('neotest-jdtls.utils.log')
 local TestLevel = require('neotest-jdtls.utils.jdtls').TestLevel
 local nio = require('nio')
@@ -68,18 +69,20 @@ local function handle_test(data, test_file_uri)
 		end
 		closest_item = children
 	end
+    log.debug("handle_test", closest_item, data)
 
 	return {
 		projectName = closest_item.projectName,
 		testLevel = TestLevel.Method,
 		testKind = closest_item.testKind,
-		testNames = { closest_item.jdtHandler },
+		testNames = { closest_item.fullName },
 	}
 end
 
 --- @param test_file_uri string
 --- @return JunitLaunchRequestArguments|nil
 local function handle_dir(tree, test_file_uri)
+    log.debug("handle_dir")
 	local file_nodes = {}
 	for _, node in tree:iter_nodes() do
 		local node_data = node:data()
@@ -125,6 +128,7 @@ end
 --- @param test_file_uri string
 --- @return JunitLaunchRequestArguments|nil
 local function handle_file(test_file_uri)
+    log.debug("handle_file")
 	local java_test_items = get_java_test_item(test_file_uri)
 	if not java_test_items or #java_test_items == 0 then
 		log.info('No test items found')
@@ -162,7 +166,7 @@ end
 
 ---@param test_file_uri string
 ---@return JunitLaunchRequestArguments|nil
-local function resolve_junit_launch_arguments(tree, test_file_uri)
+local function resolve_launch_arguments(tree, test_file_uri)
 	local data = tree:data()
 	---@type JunitLaunchRequestArguments|nil
 	local arguments
@@ -178,71 +182,235 @@ local function resolve_junit_launch_arguments(tree, test_file_uri)
 	if not arguments then
 		return nil
 	end
-	return jdtls.get_junit_launch_arguments(arguments)
+    return arguments
+end
+
+local get_clients = vim.lsp.get_clients or vim.lsp.get_active_clients
+--- Return path to com.microsoft.java.test.runner-jar-with-dependencies.jar if found in bundles
+---
+---@return string? path
+local function testng_runner()
+  local vscode_runner = 'com.microsoft.java.test.runner-jar-with-dependencies.jar'
+  local client = get_clients({name='jdtls'})[1]
+  local bundles = client and client.config.init_options.bundles or {}
+  for _, jar_path in pairs(bundles) do
+    local parts = vim.split(jar_path, '/')
+    if parts[#parts] == vscode_runner then
+      return jar_path
+    end
+    local basepath = vim.fs.dirname(jar_path)
+    if basepath then
+      for name, _ in vim.fs.dir(basepath) do
+        if name == vscode_runner then
+          return vim.fs.joinpath(basepath, name)
+        end
+      end
+    end
+  end
+  return nil
+end
+
+-- local function make_config(lens, launch_args, config_overrides)
+--   local config = {
+--     name = lens.fullName;
+--     type = 'java';
+--     request = 'launch';
+--     mainClass = launch_args.mainClass;
+--     projectName = launch_args.projectName;
+--     cwd = launch_args.workingDirectory;
+--     classPaths = launch_args.classpath;
+--     modulePaths = launch_args.modulepath;
+--     vmArgs = table.concat(launch_args.vmArguments, ' ');
+--     noDebug = false;
+--   }
+--   config = vim.tbl_extend('force', config, config_overrides or default_config_overrides)
+--   if lens.testKind == TestKind.TestNG or lens.kind == TestKind.TestNG then
+--     local jar = testng_runner()
+--     if jar then
+--       config.mainClass = 'com.microsoft.java.test.runner.Launcher'
+--       config.args = string.format('testng %s', lens.fullName)
+--       table.insert(config.classPaths, jar);
+--     else
+--
+
+--     local function fetch_launch_args(lens, context, on_launch_args)
+--   local req_arguments = make_request_args(lens, context.uri)
+--   local cmd_junit_args = {
+--     command = 'vscode.java.test.junit.argument';
+--     arguments = { vim.fn.json_encode(req_arguments) };
+--   }
+--   util.execute_command(cmd_junit_args, function(err, launch_args)
+--     if err then
+--       print('Error retrieving launch arguments: ' .. (err.message or vim.inspect(err)))
+--     elseif not launch_args then
+--       error((
+--         'Server must return launch_args as response to "vscode.java.test.junit.argument" command. '
+--         .. 'Check server logs via `:JdtShowlogs`. Sent: ' .. vim.inspect(req_arguments)))
+--     elseif launch_args.errorMessage then
+--       vim.notify(launch_args.errorMessage, vim.log.levels.WARN)
+--     else
+--       -- forward/backward compat with format change in
+--       -- https://github.com/microsoft/vscode-java-test/commit/5a78371ad60e86f858eace7726f0980926b6c31d
+--       if launch_args.body then
+--         launch_args = launch_args.body
+--       end
+--
+--       -- the classpath in the launch_args might be missing some classes
+--       -- See https://github.com/microsoft/vscode-java-test/issues/1073
+--       --
+--       -- That is why `java.project.getClasspaths` is used as well.
+--       local options = vim.fn.json_encode({ scope = 'test'; })
+--       local cmd = {
+--         command = 'java.project.getClasspaths';
+--         arguments = { vim.uri_from_bufnr(0), options };
+--       }
+--       util.execute_command(cmd, function(err1, resp)
+--         assert(not err1, vim.inspect(err1))
+--         launch_args.classpath = merge_unique(launch_args.classpath, resp.classpaths)
+--         on_launch_args(launch_args)
+--       end, context.bufnr)
+--     end
+--   end, context.bufnr)
+-- end
+
+local function merge_unique(xs, ys)
+  local result = {}
+  local seen = {}
+  local both = {}
+  vim.list_extend(both, xs or {})
+  vim.list_extend(both, ys or {})
+
+  for _, x in pairs(both) do
+    if not seen[x] then
+      table.insert(result, x)
+      seen[x] = true
+    end
+  end
+
+  return result
 end
 
 ---@param args neotest.RunArgs
 ---@return neotest.RunSpec
 function M.build_spec(args)
+    log.debug("Building spec")
 	local strategy = args.strategy
 	local tree = args and args.tree
 	local data = tree:data()
 	local test_file_uri = vim.uri_from_fname(data.path)
 
-	local junit_launch_arguments =
-		resolve_junit_launch_arguments(tree, test_file_uri)
-	if not junit_launch_arguments then
-		return {
-			context = {
-				file = data.path,
-				pos_id = data.id,
-				type = data.type,
-			},
-		}
-	end
+	local arguments = resolve_launch_arguments(tree, test_file_uri)
+    log.debug("arguments: ", arguments)
+    if not arguments then
+        return {
+            context = {
+                file = data.path,
+                pos_id = data.id,
+                type = data.type,
+            },
+        }
+    end
+    local launch_arguments = jdtls.get_junit_launch_arguments(arguments)
+    -- log.debug("launch_arguments", launch_arguments)
+    if arguments.testKind == 2 then --TestNG
+        local jar = testng_runner()
+        launch_arguments.mainClass = 'com.microsoft.java.test.runner.Launcher'
+        launch_arguments.programArguments = arguments.testNames
+        table.insert(launch_arguments.programArguments, 1, "testng")
 
-	local executable = jdtls.resolve_java_executable(
-		junit_launch_arguments.mainClass,
-		junit_launch_arguments.projectName
-	)
+        local options = vim.fn.json_encode({ scope = 'test'; })
+        local cmdArguments = { vim.uri_from_bufnr(0), options };
+        local res = jdtls.get_class_paths(cmdArguments)
+        launch_arguments.classpath = merge_unique(launch_arguments.classpath, res.classpath)
+        table.insert(launch_arguments.classpath, jar);
 
-	local is_debug = strategy == 'dap'
-	local dap_launcher_config =
-		get_dap_launcher_config(junit_launch_arguments, executable, {
-			debug = is_debug,
-			label = 'Launch All Java Tests',
-		})
-	log.debug('dap_launcher_config', vim.inspect(dap_launcher_config))
-	local report = JUnitReport()
-	local server = assert(vim.loop.new_tcp(), 'uv.new_tcp() must return handle')
-	dap_launcher_config = setup(server, dap_launcher_config, report)
+        local is_debug = strategy == 'dap'
+        local executable = jdtls.resolve_java_executable(
+            launch_arguments.mainClass,
+            launch_arguments.projectName
+        )
 
-	local config = {}
-	if not is_debug then
-		-- TODO implement console for non-debug mode
-		-- local dapui       = require('dapui')
-		-- local console_buf = dapui.elements.console.buffer()
-		run_test(dap_launcher_config, server)
-	else
-		dap_launcher_config.after = function()
-			nio.run(function()
-				shutdown_server(server)
-			end)
-		end
-		config = dap_launcher_config
-	end
+        local dap_launcher_config =
+            get_dap_launcher_config(launch_arguments, executable, {
+                debug = is_debug,
+                label = 'Launch TestNG test(s)',
+            })
 
-	local context = {
-		file = data.path,
-		pos_id = data.id,
-		type = data.type,
-		report = report,
-	}
-	local response = {
-		context = context,
-		strategy = config,
-	}
-	return response
+        local report = TestNGReport()
+        local server = assert(vim.loop.new_tcp(), 'uv.new_tcp() must return handle')
+        dap_launcher_config = setup(server, dap_launcher_config, report)
+        dap_launcher_config.args = string.format('%s %s', server:getsockname().port, dap_launcher_config.args)
+
+        local config = {}
+        if not is_debug then
+            -- TODO implement console for non-debug mode
+            -- local dapui       = require('dapui')
+            -- local console_buf = dapui.elements.console.buffer()
+            run_test(dap_launcher_config, server)
+        else
+            dap_launcher_config.after = function()
+                nio.run(function()
+                    shutdown_server(server)
+                end)
+            end
+            config = dap_launcher_config
+        end
+
+        local context = {
+            file = data.path,
+            pos_id = data.id,
+            type = data.type,
+            report = report,
+        }
+        local response = {
+            context = context,
+            strategy = config,
+        }
+        return response
+    else
+        local executable = jdtls.resolve_java_executable(
+            launch_arguments.mainClass,
+            launch_arguments.projectName
+        )
+
+        local is_debug = strategy == 'dap'
+        local dap_launcher_config =
+            get_dap_launcher_config(launch_arguments, executable, {
+                debug = is_debug,
+                label = 'Launch All Java Tests',
+            })
+        log.debug('dap_launcher_config', vim.inspect(dap_launcher_config))
+        local report = JUnitReport()
+        local server = assert(vim.loop.new_tcp(), 'uv.new_tcp() must return handle')
+        dap_launcher_config = setup(server, dap_launcher_config, report)
+
+        local config = {}
+        if not is_debug then
+            -- TODO implement console for non-debug mode
+            -- local dapui       = require('dapui')
+            -- local console_buf = dapui.elements.console.buffer()
+            run_test(dap_launcher_config, server)
+        else
+            dap_launcher_config.after = function()
+                nio.run(function()
+                    shutdown_server(server)
+                end)
+            end
+            config = dap_launcher_config
+        end
+
+        local context = {
+            file = data.path,
+            pos_id = data.id,
+            type = data.type,
+            report = report,
+        }
+        local response = {
+            context = context,
+            strategy = config,
+        }
+        return response
+    end
 end
 
 return M
