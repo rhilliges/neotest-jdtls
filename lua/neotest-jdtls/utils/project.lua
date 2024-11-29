@@ -55,7 +55,7 @@ local function load_current_project()
 	local cache = ProjectCache()
 	local root = jdtls.root_dir()
 	local project = jdtls.find_java_projects(root)
-	assert(#project == 1, vim.inspect(project))
+	assert(#project == 1)
 	local jdtHandler = project[1].jdtHandler
 
 	local data = jdtls.find_test_packages_and_types(jdtHandler)

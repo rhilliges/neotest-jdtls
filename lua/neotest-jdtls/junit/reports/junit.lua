@@ -3,7 +3,7 @@ local log = require('neotest-jdtls.utils.log')
 local ResultParserFactory =
 	require('neotest-jdtls.junit.results.result-parser-factory')
 
----@class java_test.TestNGTestReport
+---@class java_test.JUnitTestReport
 ---@field private conn uv_tcp_t
 ---@field private result_parser java_test.TestParser
 ---@field private result_parser_fac java_test.TestParserFactory

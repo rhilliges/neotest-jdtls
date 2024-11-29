@@ -210,69 +210,6 @@ local function testng_runner()
   return nil
 end
 
--- local function make_config(lens, launch_args, config_overrides)
---   local config = {
---     name = lens.fullName;
---     type = 'java';
---     request = 'launch';
---     mainClass = launch_args.mainClass;
---     projectName = launch_args.projectName;
---     cwd = launch_args.workingDirectory;
---     classPaths = launch_args.classpath;
---     modulePaths = launch_args.modulepath;
---     vmArgs = table.concat(launch_args.vmArguments, ' ');
---     noDebug = false;
---   }
---   config = vim.tbl_extend('force', config, config_overrides or default_config_overrides)
---   if lens.testKind == TestKind.TestNG or lens.kind == TestKind.TestNG then
---     local jar = testng_runner()
---     if jar then
---       config.mainClass = 'com.microsoft.java.test.runner.Launcher'
---       config.args = string.format('testng %s', lens.fullName)
---       table.insert(config.classPaths, jar);
---     else
---
-
---     local function fetch_launch_args(lens, context, on_launch_args)
---   local req_arguments = make_request_args(lens, context.uri)
---   local cmd_junit_args = {
---     command = 'vscode.java.test.junit.argument';
---     arguments = { vim.fn.json_encode(req_arguments) };
---   }
---   util.execute_command(cmd_junit_args, function(err, launch_args)
---     if err then
---       print('Error retrieving launch arguments: ' .. (err.message or vim.inspect(err)))
---     elseif not launch_args then
---       error((
---         'Server must return launch_args as response to "vscode.java.test.junit.argument" command. '
---         .. 'Check server logs via `:JdtShowlogs`. Sent: ' .. vim.inspect(req_arguments)))
---     elseif launch_args.errorMessage then
---       vim.notify(launch_args.errorMessage, vim.log.levels.WARN)
---     else
---       -- forward/backward compat with format change in
---       -- https://github.com/microsoft/vscode-java-test/commit/5a78371ad60e86f858eace7726f0980926b6c31d
---       if launch_args.body then
---         launch_args = launch_args.body
---       end
---
---       -- the classpath in the launch_args might be missing some classes
---       -- See https://github.com/microsoft/vscode-java-test/issues/1073
---       --
---       -- That is why `java.project.getClasspaths` is used as well.
---       local options = vim.fn.json_encode({ scope = 'test'; })
---       local cmd = {
---         command = 'java.project.getClasspaths';
---         arguments = { vim.uri_from_bufnr(0), options };
---       }
---       util.execute_command(cmd, function(err1, resp)
---         assert(not err1, vim.inspect(err1))
---         launch_args.classpath = merge_unique(launch_args.classpath, resp.classpaths)
---         on_launch_args(launch_args)
---       end, context.bufnr)
---     end
---   end, context.bufnr)
--- end
-
 local function merge_unique(xs, ys)
   local result = {}
   local seen = {}
