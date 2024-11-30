@@ -190,9 +190,17 @@ local get_clients = vim.lsp.get_clients or vim.lsp.get_active_clients
 ---
 ---@return string? path
 local function testng_runner()
+
+  local bundles = {}
+  local mason_path = vim.fn.glob(vim.fn.stdpath "data" .. "/mason/")
+  vim.list_extend(bundles, vim.split(vim.fn.glob(mason_path .. "packages/java-test/extension/server/*.jar"), "\n"))
+
   local vscode_runner = 'com.microsoft.java.test.runner-jar-with-dependencies.jar'
-  local client = get_clients({name='jdtls'})[1]
-  local bundles = client and client.config.init_options.bundles or {}
+
+  -- TODO check more locations
+  -- local client = get_clients({name='jdtls'})[1]
+  -- local bundles = client and client.config.init_options.bundles or {}
+
   for _, jar_path in pairs(bundles) do
     local parts = vim.split(jar_path, '/')
     if parts[#parts] == vscode_runner then
@@ -207,7 +215,7 @@ local function testng_runner()
       end
     end
   end
-  return nil
+  assert(false, "This project requires the 'com.microsoft.java.test.runner-jar-with-dependencies.jar' to run TestNG tests. If you are using Mason, try installing the java-test package.")
 end
 
 local function merge_unique(xs, ys)
@@ -237,7 +245,6 @@ function M.build_spec(args)
 	local test_file_uri = vim.uri_from_fname(data.path)
 
 	local arguments = resolve_launch_arguments(tree, test_file_uri)
-    log.debug("arguments: ", arguments)
     if not arguments then
         return {
             context = {
@@ -247,9 +254,16 @@ function M.build_spec(args)
             },
         }
     end
+
     local launch_arguments = jdtls.get_junit_launch_arguments(arguments)
-    -- log.debug("launch_arguments", launch_arguments)
+    local is_debug = strategy == 'dap'
+    local server = assert(vim.loop.new_tcp(), 'uv.new_tcp() must return handle')
+
+    local report;
+    local dap_launcher_config;
     if arguments.testKind == 2 then --TestNG
+        report = TestNGReport()
+
         local jar = testng_runner()
         launch_arguments.mainClass = 'com.microsoft.java.test.runner.Launcher'
         launch_arguments.programArguments = arguments.testNames
@@ -261,93 +275,62 @@ function M.build_spec(args)
         launch_arguments.classpath = merge_unique(launch_arguments.classpath, res.classpath)
         table.insert(launch_arguments.classpath, jar);
 
-        local is_debug = strategy == 'dap'
         local executable = jdtls.resolve_java_executable(
             launch_arguments.mainClass,
             launch_arguments.projectName
         )
 
-        local dap_launcher_config =
+        dap_launcher_config =
             get_dap_launcher_config(launch_arguments, executable, {
                 debug = is_debug,
                 label = 'Launch TestNG test(s)',
             })
 
-        local report = TestNGReport()
-        local server = assert(vim.loop.new_tcp(), 'uv.new_tcp() must return handle')
         dap_launcher_config = setup(server, dap_launcher_config, report)
         dap_launcher_config.args = string.format('%s %s', server:getsockname().port, dap_launcher_config.args)
 
-        local config = {}
-        if not is_debug then
-            -- TODO implement console for non-debug mode
-            -- local dapui       = require('dapui')
-            -- local console_buf = dapui.elements.console.buffer()
-            run_test(dap_launcher_config, server)
-        else
-            dap_launcher_config.after = function()
-                nio.run(function()
-                    shutdown_server(server)
-                end)
-            end
-            config = dap_launcher_config
-        end
-
-        local context = {
-            file = data.path,
-            pos_id = data.id,
-            type = data.type,
-            report = report,
-        }
-        local response = {
-            context = context,
-            strategy = config,
-        }
-        return response
     else
+        report = JUnitReport()
+
         local executable = jdtls.resolve_java_executable(
             launch_arguments.mainClass,
             launch_arguments.projectName
         )
 
-        local is_debug = strategy == 'dap'
-        local dap_launcher_config =
+        dap_launcher_config =
             get_dap_launcher_config(launch_arguments, executable, {
                 debug = is_debug,
                 label = 'Launch All Java Tests',
             })
         log.debug('dap_launcher_config', vim.inspect(dap_launcher_config))
-        local report = JUnitReport()
-        local server = assert(vim.loop.new_tcp(), 'uv.new_tcp() must return handle')
         dap_launcher_config = setup(server, dap_launcher_config, report)
-
-        local config = {}
-        if not is_debug then
-            -- TODO implement console for non-debug mode
-            -- local dapui       = require('dapui')
-            -- local console_buf = dapui.elements.console.buffer()
-            run_test(dap_launcher_config, server)
-        else
-            dap_launcher_config.after = function()
-                nio.run(function()
-                    shutdown_server(server)
-                end)
-            end
-            config = dap_launcher_config
-        end
-
-        local context = {
-            file = data.path,
-            pos_id = data.id,
-            type = data.type,
-            report = report,
-        }
-        local response = {
-            context = context,
-            strategy = config,
-        }
-        return response
     end
+
+    local config = {}
+    if not is_debug then
+        -- TODO implement console for non-debug mode
+        -- local dapui       = require('dapui')
+        -- local console_buf = dapui.elements.console.buffer()
+        run_test(dap_launcher_config, server)
+    else
+        dap_launcher_config.after = function()
+            nio.run(function()
+                shutdown_server(server)
+            end)
+        end
+        config = dap_launcher_config
+    end
+    local context = {
+        file = data.path,
+        pos_id = data.id,
+        type = data.type,
+        report = report,
+    }
+    local response = {
+        context = context,
+        strategy = config,
+    }
+    return response
 end
 
 return M
