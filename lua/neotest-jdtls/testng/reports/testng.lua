@@ -27,19 +27,26 @@ end
 function TestNGReport:get_stream_reader(conn)
 	self.conn = conn
 	self.result_parser = self.result_parser_fac:get_parser()
-	return vim.schedule_wrap(function(err, buffer)
-		if err then
-			self.conn:close()
-			return
-		end
+	self.result_parser = self.result_parser_fac:get_parser()
+	local buffer_loop = function ()
+		local buffer = ""
+		return function(err, chunk)
+			if err then
+				self.conn:close()
+				return
+			end
 
-		if buffer then
-			self:on_update(buffer)
-		else
-			self.conn:close()
+			if chunk then
+				buffer = buffer .. chunk
+			else
+				self:on_update(buffer)
+				self.conn:close()
+			end
 		end
-	end)
+	end
+	return vim.schedule_wrap(buffer_loop())
 end
+
 
 ---Runs on connection update
 ---@private

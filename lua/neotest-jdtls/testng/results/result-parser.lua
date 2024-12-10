@@ -32,11 +32,10 @@ local function parse(content)
       local test = vim.json.decode(line)
       if test.name ~= 'testStarted' then
           return test
-        -- table.insert(tests, test)
       end
-      return nil
     end
   end
+  return nil
 end
 
 ---Parse a given text into test details
@@ -44,6 +43,7 @@ end
 function TestParser:parse(text)
     local parsedResult = parse(text)
     if parsedResult == nil then
+		log.info("Could not parse result.", text)
         return;
     end
     local testName = parsedResult["attributes"]["name"]
@@ -51,25 +51,38 @@ function TestParser:parse(text)
     local testPathElements = vim.split(test[1], "%.")
     local testFile = testPathElements[#testPathElements]
     local testMethodName = test[2]:sub(1,-3)
-    local testId = test[1]:gsub("%.","/") .. ".java::" .. testFile .. "::" .. testMethodName
-    testId = vim.fn.getcwd() .. "/src/test/java/" .. testId
+	local testId = vim.fn.expand("src/**/" .. test[1]:gsub("%.","/") .. ".java")
+	testId = vim.fn.getcwd() .. "/" .. testId .. "::" .. testFile .. "::" .. testMethodName
+
     local status = parsedResult["name"]
+	local repl = require('dap.repl')
     if status == 'testFailed' then
+		local msg = parsedResult["attributes"]["message"] or 'test failed'
+		local trace = parsedResult["attributes"]["trace"]
         self.test_details.results[testId] = {
             status = "failed",
-            short = parsedResult["attributes"]["message"],
+            short = msg,
             errors = {
                 {
-                    message = parsedResult["attributes"]["trace"],
+                    message = trace,
                 }
             },
         }
+		if repl ~= nil then 
+			repl.append(' ' .. testName .. ' failed')
+			repl.append(msg)
+			repl.append(trace)
+		end
     elseif status == 'testFinished' then
         self.test_details.results[testId] = {
             status = "passed",
         }
+		if repl ~= nil then
+			repl.append(' ' .. testName .. ' passed')
+		end
+	else
+		log.warn("Unknown test status: ", parsedResult["name"])
     end
-    log.warn("Unknown test status: ", parsedResult["name"])
 end
 
 return TestParser
