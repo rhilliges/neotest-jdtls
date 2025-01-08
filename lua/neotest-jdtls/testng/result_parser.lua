@@ -1,26 +1,19 @@
+
 local class = require('neotest-jdtls.utils.class')
 local log = require('neotest-jdtls.utils.log')
-local MessageId = require('neotest-jdtls.junit.results.message-id')
-local TestStatus = require('neotest-jdtls.junit.results.result-status')
-local TestExecStatus = require('neotest-jdtls.junit.results.execution-status')
+local BaseParser = require('neotest-jdtls.utils.base_parser')
 
----@class java_test.TestParser
-local TestParser = class()
+---@class java_test.TestNGTestParser : BaseParser
+---@field private test_details java_test.TestResults[]
+local TestNGTestParser = class(BaseParser)
 
----Init
----@private
-function TestParser:_init()
-	self.test_details = {
-        testType = 2, -- TestNG
-        results = {}
-    }
-end
-
-
----Returns the parsed test details
----@return java_test.TestResults # parsed test details
-function TestParser:get_test_details()
-	return self.test_details
+---@param context TestContext
+function TestNGTestParser:_init(context)
+	-- self:super()
+	self.context = context
+	self.test_details = {}
+	self.lookup = {}
+	self.results = {}
 end
 
 local function parse(content)
@@ -38,9 +31,10 @@ local function parse(content)
   return nil
 end
 
+
 ---Parse a given text into test details
 ---@param text string test result buffer
-function TestParser:parse(text)
+function TestNGTestParser:on_update(text)
     local parsedResult = parse(text)
     if parsedResult == nil then
 		log.info("Could not parse result.", text)
@@ -59,7 +53,7 @@ function TestParser:parse(text)
     if status == 'testFailed' then
 		local msg = parsedResult["attributes"]["message"] or 'test failed'
 		local trace = parsedResult["attributes"]["trace"]
-        self.test_details.results[testId] = {
+        self.results[testId] = {
             status = "failed",
             short = msg,
             errors = {
@@ -68,7 +62,7 @@ function TestParser:parse(text)
                 }
             },
         }
-		if repl ~= nil then 
+		if repl ~= nil then
 			repl.append(' ' .. testName .. ' failed')
 			repl.append(msg)
 			repl.append(trace)
@@ -85,12 +79,10 @@ function TestParser:parse(text)
     end
 end
 
-return TestParser
-
 ---@class java_test.TestResultExecutionDetails
 ---@field actual string[] lines
 ---@field expected string[] lines
----@field status java_test.TestStatus
+---@field status java_test.TestExecStatus
 ---@field execution java_test.TestExecutionStatus
 ---@field trace string[] lines
 
@@ -106,3 +98,5 @@ return TestParser
 ---@field unique_id string
 ---@field result java_test.TestResultExecutionDetails
 ---@field children java_test.TestResults[]
+
+return TestNGTestParser
